@@ -2,13 +2,12 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
-import 'package:websocket/websocket.dart' show WebSocket, WebSocketStatus;
-
-import 'package:rxdart/rxdart.dart';
-import 'package:uuid_enhanced/uuid.dart';
 
 import 'package:graphql/src/websocket/messages.dart';
+import 'package:meta/meta.dart';
+import 'package:rxdart/rxdart.dart';
+import 'package:uuid_enhanced/uuid.dart';
+import 'package:websocket/websocket.dart' show WebSocket, WebSocketStatus;
 
 typedef GetInitPayload = FutureOr<dynamic> Function();
 
@@ -104,6 +103,9 @@ class SocketClient {
 
   StreamSubscription<ConnectionKeepAlive> _keepAliveSubscription;
   StreamSubscription<GraphQLSocketMessage> _messageSubscription;
+
+  HashMap<String, SubscriptionListener> get subscriptionInitializers =>
+      _subscriptionInitializers;
 
   /// Connects to the server.
   ///

@@ -1,10 +1,11 @@
-import 'package:meta/meta.dart';
+import 'dart:async';
 
 import 'package:graphql/src/link/fetch_result.dart';
 import 'package:graphql/src/link/link.dart';
 import 'package:graphql/src/link/operation.dart';
 import 'package:graphql/src/socket_client.dart';
 import 'package:graphql/src/websocket/messages.dart';
+import 'package:meta/meta.dart';
 
 /// A Universal Websocket [Link] implementation to support the websocket transport.
 /// It supports subscriptions, query and mutation operations as well.
@@ -16,6 +17,7 @@ class WebSocketLink extends Link {
   WebSocketLink({
     @required this.url,
     this.config = const SocketClientConfig(),
+    this.subscriptionInactivity = const Duration(seconds: 30),
   }) : super() {
     request = _doOperation;
   }
@@ -23,27 +25,57 @@ class WebSocketLink extends Link {
   final String url;
   final SocketClientConfig config;
 
+  /// Automatically disconnect from websocket if no subscription is currently active after [subscriptionInactivity] have passed
+  final Duration subscriptionInactivity;
+
   // cannot be final because we're changing the instance upon a header change.
   SocketClient _socketClient;
+  bool _isPerformingOperation = false;
+  Timer _subscriptionInactivityWatcherTimer = null;
+
+  void _initializeSubscriptionInactivityWatcher() async {
+    if (_subscriptionInactivityWatcherTimer == null) {
+      _subscriptionInactivityWatcherTimer =
+          new Timer.periodic(subscriptionInactivity, (Timer t) async {
+        await _closeIfNoSubscriptions();
+      });
+    }
+  }
+
+  void _closeIfNoSubscriptions() async {
+    if (_socketClient != null &&
+        _socketClient.subscriptionInitializers.isEmpty &&
+        !_isPerformingOperation) {
+      await dispose();
+      _subscriptionInactivityWatcherTimer?.cancel();
+      _subscriptionInactivityWatcherTimer = null;
+    }
+  }
 
   Stream<FetchResult> _doOperation(Operation operation, [NextLink forward]) {
     if (_socketClient == null) {
       connectOrReconnect();
     }
 
-    return _socketClient.subscribe(SubscriptionRequest(operation), true).map(
-          (SubscriptionData result) => FetchResult(
-              data: result.data,
-              errors: result.errors as List<dynamic>,
-              context: operation.getContext(),
-              extensions: operation.extensions),
-        );
+    _isPerformingOperation = true;
+    Stream<FetchResult> subscriptionRequest =
+        _socketClient.subscribe(SubscriptionRequest(operation), true).map(
+              (SubscriptionData result) => FetchResult(
+                  data: result.data,
+                  errors: result.errors as List<dynamic>,
+                  context: operation.getContext(),
+                  extensions: operation.extensions),
+            );
+
+    _isPerformingOperation = false;
+    return subscriptionRequest;
   }
 
   /// Connects or reconnects to the server with the specified headers.
   void connectOrReconnect() {
     _socketClient?.dispose();
     _socketClient = SocketClient(url, config: config);
+    _initializeSubscriptionInactivityWatcher();
   }
 
   /// Disposes the underlying socket client explicitly. Only use this, if you want to disconnect from
